@@ -49,7 +49,7 @@ contract HelperConfig is Script {
         public
         returns (NetworkConfig memory anvilNetworkConfig)
     {
-        if (anvilNetworkConfig.weth != address(0)) {
+        if (anvilNetworkConfig.wethUsdPriceFeed != address(0)) {
             return activeNetworkConfig;
         }
         vm.startBroadcast();
