@@ -1,28 +1,5 @@
 // SPDX-License-Identifier: MIT
 
-// This is considered an Exogenous, Decentralized, Anchored (pegged), Crypto Collateralized low volitility coin
-
-// Layout of Contract:
-// version
-// imports
-// interfaces, libraries, contracts
-// errors
-// Type declarations
-// State variables
-// Events
-// Modifiers
-// Functions
-
-// Layout of Functions:
-// constructor
-// receive function (if exists)
-// fallback function (if exists)
-// external
-// public
-// internal
-// private
-// view & pure functions
-
 pragma solidity ^0.8.18;
 
 import {DecentralizedStableCoin} from "./DecentralizedStableCoin.sol";
@@ -30,24 +7,29 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
-/*
+
+/**
  * @title DSCEngine
  * @author Varun Chauhan
- *
- * The system is designed to be as minimal as possible, and have the tokens maintain a 1 token == $1 peg at all times.
- * This is a stablecoin with the properties:
- * - Exogenously Collateralized
- * - Dollar Pegged
- * - Algorithmically Stable
- *
- * It is similar to DAI if DAI had no governance, no fees, and was backed by only WETH and WBTC.
- *
- * Our DSC system should always be "overcollateralized". At no point, should the value of
- * all collateral < the $ backed value of all the DSC.
- *
- * @notice This contract is the core of the Decentralized Stablecoin system. It handles all the logic
- * for minting and redeeming DSC, as well as depositing and withdrawing collateral.
- * @notice This contract is based on the MakerDAO DSS system
+ * @notice This contract is the core of the Decentralized Stablecoin (DSC) system
+ * @dev Implements a collateral-backed stablecoin system similar to MakerDAO's DAI
+ * 
+ * SYSTEM PROPERTIES:
+ * - Exogenously Collateralized: Backed by external crypto assets (WETH, WBTC)
+ * - Dollar Pegged: Maintains 1 DSC = $1 USD value
+ * - Algorithmically Stable: Uses liquidation mechanisms to maintain stability
+ * - Overcollateralized: Total collateral value always exceeds DSC supply
+ * 
+ * KEY FEATURES:
+ * - Deposit collateral (WETH/WBTC) to mint DSC tokens
+ * - Redeem collateral by burning DSC tokens
+ * - Liquidation system to maintain system health
+ * - Health factor monitoring to prevent undercollateralization
+ * 
+ * SECURITY CONSIDERATIONS:
+ * - Uses Chainlink price feeds for accurate asset pricing
+ * - Implements reentrancy protection on all state-changing functions
+ * - Maintains minimum collateralization ratio of 200% (50% liquidation threshold)
  */
 
 contract DSCEngine is ReentrancyGuard {
@@ -55,14 +37,28 @@ contract DSCEngine is ReentrancyGuard {
                                  ERRORS
     //////////////////////////////////////////////////////////////*/
 
+    /// @notice Thrown when amount parameter is zero or negative
     error DSCEngine__AmountMustBeGreaterThanZero();
+    
+    /// @notice Thrown when token and price feed arrays have different lengths
     error DSCEngine__LengthsOfTokensAndPriceFeedsMustMatch();
+    
+    /// @notice Thrown when trying to use an unsupported collateral token
     error DSCEngine__TokenNotSupported();
+    
+    /// @notice Thrown when ERC20 token transfer fails
     error DSCEngine__TransferFailed();
+    
+    /// @notice Thrown when user's health factor drops below minimum threshold
+    /// @param healthFactor The current health factor that caused the revert
     error DSCEngine__BreakHealthFactor(uint256 healthFactor);
+    
+    /// @notice Thrown when DSC minting operation fails
     error DSCEngine__MintFailed();
+    
+    /// @notice Thrown when trying to liquidate a healthy position
     error DSCEngine__HealthFactorOk();
-
+    
     /*//////////////////////////////////////////////////////////////
                              STATE VARIABLE
     //////////////////////////////////////////////////////////////*/
