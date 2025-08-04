@@ -14,7 +14,10 @@ contract DSCEngineTest is Test {
     DSCEngine public dscEngine;
     HelperConfig public config;
     address public ethUsdPriceFeed;
+    address public btcUsdPriceFeed;
+    address public wbtc;
     address public weth;
+    uint256 public deployerKey;
 
     address public USER = makeAddr("USER");
     uint256 public constant AMOUNT_COLLATORAL = 10 ether;
@@ -23,8 +26,42 @@ contract DSCEngineTest is Test {
     function setUp() external {
         DeployDSC deployDSC = new DeployDSC();
         (dsc, dscEngine, config) = deployDSC.run();
-        (ethUsdPriceFeed, , weth, , ) = config.activeNetworkConfig();
+        (ethUsdPriceFeed, btcUsdPriceFeed, weth, wbtc, deployerKey) = config
+            .activeNetworkConfig();
         ERC20Mock(weth).mint(USER, STARTING_ER20_BALANCE);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            MODIFIERS
+    //////////////////////////////////////////////////////////////*/
+
+    modifier depositCollatoral() {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dscEngine), AMOUNT_COLLATORAL);
+        dscEngine.depositCollatoral(weth, AMOUNT_COLLATORAL);
+        vm.stopPrank();
+        _;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            CONSTRUCTOR TEST
+    //////////////////////////////////////////////////////////////*/
+
+    address[] public tokens = [weth];
+    address[] public priceFeeds = [ethUsdPriceFeed, btcUsdPriceFeed];
+
+    function testRevertIfLengthsOfTokensAndPriceFeedsDontMatch() public {
+        vm.expectRevert(
+            DSCEngine.DSCEngine__LengthsOfTokensAndPriceFeedsMustMatch.selector
+        );
+        new DSCEngine(tokens, priceFeeds, address(dsc));
+    }
+
+    function testGetTokenAmountFromUsd() public view {
+        uint256 usdAmount = 100 ether;
+        uint256 expectedTokenAmount = 0.05 ether;
+        uint256 tokenAmount = dscEngine.getTokenAmountFromUsd(weth, usdAmount);
+        assert(tokenAmount == expectedTokenAmount);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -52,5 +89,26 @@ contract DSCEngineTest is Test {
         );
 
         dscEngine.depositCollatoral(weth, 0);
+    }
+
+    function testRevertIfUnapproveCollatoral() public {
+        ERC20Mock token = new ERC20Mock("token", "token", USER, 1000 ether);
+        vm.startPrank(USER);
+        vm.expectRevert(DSCEngine.DSCEngine__TokenNotSupported.selector);
+        dscEngine.depositCollatoral(address(token), AMOUNT_COLLATORAL);
+        vm.stopPrank();
+    }
+
+    function testUserCanDepositeAndGetInfo() public depositCollatoral {
+        (uint256 totalDscMinted, uint256 collatoralValueInUsd) = dscEngine
+            .getAccountInfo(USER);
+
+        uint256 expectedTotalDscMinted = 0;
+        uint256 expectedCollateralValueInUsd = dscEngine.getCollatoralValue(
+            weth,
+            AMOUNT_COLLATORAL
+        );
+        assertEq(totalDscMinted, expectedTotalDscMinted);
+        assertEq(collatoralValueInUsd, expectedCollateralValueInUsd);
     }
 }

@@ -86,7 +86,7 @@ contract DSCEngine is ReentrancyGuard {
     event DepositCollatoral(
         address indexed user,
         address indexed tokenCollatoral,
-        uint256 indexed amount
+        uint256 amount
     );
 
     event CollatoralRedeemed(
@@ -189,7 +189,14 @@ contract DSCEngine is ReentrancyGuard {
         uint256 amount
     ) public moreThanZero(amount) isAllowedToken(tokenCollatoral) nonReentrant {
         // deposit collateral
-
+        s_balances[msg.sender][tokenCollatoral] += amount;
+        emit DepositCollatoral(msg.sender, tokenCollatoral, amount);
+        bool success = IERC20(tokenCollatoral).transferFrom(
+            msg.sender,
+            address(this),
+            amount
+        );
+        if (!success) revert DSCEngine__TransferFailed();
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -203,6 +210,20 @@ contract DSCEngine is ReentrancyGuard {
 
         bool success = i_dsc.mint(msg.sender, amountDscToMint);
         if (!success) revert DSCEngine__MintFailed();
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                            GETTER FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    function getAccountInfo(
+        address user
+    )
+        public
+        view
+        returns (uint256 totalDscMinted, uint256 collatoralValueInUsd)
+    {
+        (totalDscMinted, collatoralValueInUsd) = _getUserInfo(user);
     }
 
     function getAccountCollatoralValue(
@@ -278,11 +299,16 @@ contract DSCEngine is ReentrancyGuard {
         (uint256 totalDscMinted, uint256 collatoralValueInUsd) = _getUserInfo(
             user
         );
-        uint256 updatedCollatoralValueInUsd = (collatoralValueInUsd *
-            LIQUIDATION_PRECISION) / LIQUIDATION_THRESHOLD;
-        return
-            (totalDscMinted * updatedCollatoralValueInUsd) /
-            collatoralValueInUsd;
+
+        // If no DSC is minted, health factor is essentially infinite (maximum)
+        if (totalDscMinted == 0) {
+            return type(uint256).max;
+        }
+
+        uint256 collatoralAdjustedForThreshold = (collatoralValueInUsd *
+            LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+
+        return (collatoralAdjustedForThreshold * PRECISION) / totalDscMinted;
     }
 
     function _getUserInfo(
@@ -299,7 +325,7 @@ contract DSCEngine is ReentrancyGuard {
     function getTokenAmountFromUsd(
         address tokenCollatoral,
         uint256 usdAmount
-    ) private view returns (uint256) {
+    ) public view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             s_priceFeed[tokenCollatoral]
         );
