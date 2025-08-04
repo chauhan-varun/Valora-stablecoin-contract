@@ -7,25 +7,24 @@ import {ReentrancyGuard} from "@openzeppelin/contracts/security/ReentrancyGuard.
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
 
-
 /**
  * @title DSCEngine
  * @author Varun Chauhan
  * @notice This contract is the core of the Decentralized Stablecoin (DSC) system
  * @dev Implements a collateral-backed stablecoin system similar to MakerDAO's DAI
- * 
+ *
  * SYSTEM PROPERTIES:
  * - Exogenously Collateralized: Backed by external crypto assets (WETH, WBTC)
  * - Dollar Pegged: Maintains 1 DSC = $1 USD value
  * - Algorithmically Stable: Uses liquidation mechanisms to maintain stability
  * - Overcollateralized: Total collateral value always exceeds DSC supply
- * 
+ *
  * KEY FEATURES:
  * - Deposit collateral (WETH/WBTC) to mint DSC tokens
  * - Redeem collateral by burning DSC tokens
  * - Liquidation system to maintain system health
  * - Health factor monitoring to prevent undercollateralization
- * 
+ *
  * SECURITY CONSIDERATIONS:
  * - Uses Chainlink price feeds for accurate asset pricing
  * - Implements reentrancy protection on all state-changing functions
@@ -39,32 +38,33 @@ contract DSCEngine is ReentrancyGuard {
 
     /// @notice Thrown when amount parameter is zero or negative
     error DSCEngine__AmountMustBeGreaterThanZero();
-    
+
     /// @notice Thrown when token and price feed arrays have different lengths
     error DSCEngine__LengthsOfTokensAndPriceFeedsMustMatch();
-    
+
     /// @notice Thrown when trying to use an unsupported collateral token
     error DSCEngine__TokenNotSupported();
-    
+
     /// @notice Thrown when ERC20 token transfer fails
     error DSCEngine__TransferFailed();
-    
+
     /// @notice Thrown when user's health factor drops below minimum threshold
     /// @param healthFactor The current health factor that caused the revert
     error DSCEngine__BreakHealthFactor(uint256 healthFactor);
-    
+
     /// @notice Thrown when DSC minting operation fails
     error DSCEngine__MintFailed();
-    
+
     /// @notice Thrown when trying to liquidate a healthy position
     error DSCEngine__HealthFactorOk();
-    
+    error DSCEngine__HealthFactorNotImproved();
+
     /*//////////////////////////////////////////////////////////////
                              STATE VARIABLE
     //////////////////////////////////////////////////////////////*/
 
     uint256 private constant ADDITIONAL_PRICEFEED_PRECISION = 1e10;
-    
+
     uint256 private constant PRECISION = 1e18;
     uint256 private constant LIQUIDATION_THRESHOLD = 50;
     uint256 private constant LIQUIDATION_PRECISION = 100;
@@ -112,7 +112,7 @@ contract DSCEngine is ReentrancyGuard {
     }
 
     /*//////////////////////////////////////////////////////////////
-                               FUNCTIONS
+                               CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
 
     constructor(
@@ -154,8 +154,8 @@ contract DSCEngine is ReentrancyGuard {
         moreThanZero(debtToCover)
         nonReentrant
     {
-        uint256 healthFactor = _healthFactor(user);
-        if (healthFactor >= MIN_HEALTH_FACTOR)
+        uint256 initialHealthFactor = _healthFactor(user);
+        if (initialHealthFactor >= MIN_HEALTH_FACTOR)
             revert DSCEngine__HealthFactorOk();
 
         uint256 tokenAmountFromDebtCovered = getTokenAmountFromUsd(
@@ -164,6 +164,20 @@ contract DSCEngine is ReentrancyGuard {
         );
         uint256 bonusCollatoral = (tokenAmountFromDebtCovered *
             LIQUIDATION_BONUS) / LIQUIDATION_PRECISION;
+        uint256 totalCollatoralToRedeem = tokenAmountFromDebtCovered +
+            bonusCollatoral;
+        _redeemCollatoral(
+            user,
+            msg.sender,
+            collatoral,
+            totalCollatoralToRedeem
+        );
+        _burnDsc(debtToCover, user, msg.sender);
+
+        uint256 finalHealthFactor = _healthFactor(user);
+        if (finalHealthFactor < MIN_HEALTH_FACTOR)
+            revert DSCEngine__HealthFactorNotImproved();
+        _revertIfHealthFactorIsBroken(msg.sender);
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -230,11 +244,7 @@ contract DSCEngine is ReentrancyGuard {
 
     function burnDsc(uint256 amount) public {
         // burn DSC
-        s_dscMint[msg.sender] -= amount;
-        bool success = i_dsc.transferFrom(msg.sender, address(this), amount);
-        if (!success) revert DSCEngine__MintFailed();
-
-        i_dsc.burn(amount);
+        _burnDsc(amount, msg.sender, msg.sender);
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -294,16 +304,32 @@ contract DSCEngine is ReentrancyGuard {
             s_priceFeed[tokenCollatoral]
         );
         (, int256 price, , , ) = priceFeed.latestRoundData();
-        return
-            ((usdAmount * PRECISION) /
+        return ((usdAmount * PRECISION) /
             (uint256(price) * ADDITIONAL_PRICEFEED_PRECISION));
     }
 
-    function _redeemCollatoral(address from, address to, address tokenCollatoral, uint256 amount) private {
+    function _redeemCollatoral(
+        address from,
+        address to,
+        address tokenCollatoral,
+        uint256 amount
+    ) private {
         // redeem collateral
         s_balances[from][tokenCollatoral] -= amount;
         emit CollatoralRedeemed(from, to, tokenCollatoral, amount);
         bool success = IERC20(tokenCollatoral).transfer(to, amount);
         if (!success) revert DSCEngine__TransferFailed();
+    }
+
+    function _burnDsc(
+        uint256 amountToBurn,
+        address ofBehalfOf,
+        address dscFrom
+    ) private {
+        // burn DSC
+        s_dscMint[ofBehalfOf] -= amountToBurn;
+        bool success = i_dsc.transferFrom(dscFrom, address(this), amountToBurn);
+        if (!success) revert DSCEngine__TransferFailed();
+        i_dsc.burn(amountToBurn);
     }
 }
