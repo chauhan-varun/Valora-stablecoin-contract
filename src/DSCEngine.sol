@@ -276,13 +276,13 @@ contract DSCEngine is ReentrancyGuard {
      * @dev More gas efficient than calling both functions separately
      * @dev Health factor is checked after both operations complete
      */
-    function depositCollatoralAndMintDsc(
+    function depositCollateralAndMintDsc(
         address tokenCollatoral,
         uint256 amount,
         uint256 amountDscToMint
     ) external {
         // Step 1: Deposit collateral to increase user's collateral balance
-        depositCollatoral(tokenCollatoral, amount);
+        depositCollateral(tokenCollatoral, amount);
         
         // Step 2: Mint DSC tokens against the deposited collateral
         mintDsc(amountDscToMint);
@@ -400,7 +400,7 @@ contract DSCEngine is ReentrancyGuard {
      * @param tokenCollatoral The address of the collateral token to deposit
      * @param amount The amount of collateral to deposit (in token's native decimals)
      * @dev Increases user's collateral balance and transfers tokens to this contract
-     * @dev Does not mint DSC tokens - use mintDsc() or depositCollatoralAndMintDsc() for that
+     * @dev Does not mint DSC tokens - use mintDsc() or depositCollateralAndMintDsc() for that
      * @dev User must approve this contract to spend their tokens before calling
      * 
      * PROCESS:
@@ -410,7 +410,7 @@ contract DSCEngine is ReentrancyGuard {
      * 4. Transfer tokens from user to this contract
      * 5. Revert if transfer fails
      */
-    function depositCollatoral(
+    function depositCollateral(
         address tokenCollatoral,
         uint256 amount
     ) public moreThanZero(amount) isAllowedToken(tokenCollatoral) nonReentrant {
@@ -728,7 +728,7 @@ contract DSCEngine is ReentrancyGuard {
      * @return PRECISION The precision value (1e18)
      * @dev Used by external contracts for consistent calculations
      */
-    function getPresion() external pure returns (uint256) {
+    function getPrecision() external pure returns (uint256) {
         return PRECISION;
     }
 
