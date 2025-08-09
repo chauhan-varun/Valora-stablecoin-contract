@@ -47,10 +47,13 @@ contract DSCEngineTest is Test {
                             CONSTRUCTOR TEST
     //////////////////////////////////////////////////////////////*/
 
-    address[] public tokens = [weth];
-    address[] public priceFeeds = [ethUsdPriceFeed, btcUsdPriceFeed];
+    address[] public tokens;
+    address[] public priceFeeds;
 
     function testRevertIfLengthsOfTokensAndPriceFeedsDontMatch() public {
+        tokens.push(weth);
+        priceFeeds.push(btcUsdPriceFeed);
+        priceFeeds.push(ethUsdPriceFeed);
         vm.expectRevert(
             DSCEngine.DSCEngine__LengthsOfTokensAndPriceFeedsMustMatch.selector
         );
