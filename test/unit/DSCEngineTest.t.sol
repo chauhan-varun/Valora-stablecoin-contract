@@ -75,7 +75,7 @@ contract DSCEngineTest is Test {
         uint256 ethAmount = 15 ether;
         uint256 expectedUsdValue = 30000 ether;
 
-        uint256 usdValue = dscEngine.getCollatoralValue(weth, ethAmount);
+        uint256 usdValue = dscEngine.getUsdValue(weth, ethAmount);
         assert(usdValue == expectedUsdValue);
     }
 
@@ -107,7 +107,7 @@ contract DSCEngineTest is Test {
             .getAccountInfo(USER);
 
         uint256 expectedTotalDscMinted = 0;
-        uint256 expectedCollateralValueInUsd = dscEngine.getCollatoralValue(
+        uint256 expectedCollateralValueInUsd = dscEngine.getUsdValue(
             weth,
             AMOUNT_COLLATORAL
         );
