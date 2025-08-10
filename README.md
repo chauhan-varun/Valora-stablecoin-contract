@@ -70,18 +70,22 @@ flowchart LR
     end
     
     subgraph "Price Feeds"
-        PF1[WETH/USD Oracle]
-        PF2[WBTC/USD Oracle]
+        PF1[Chainlink WETH/USD<br/>Oracle]
+        PF2[Chainlink WBTC/USD<br/>Oracle]
     end
     
     subgraph "Core Protocol"
-        DSCEngine[DSC Engine<br/>Core Logic]
-        DSCToken[DSC Token<br/>ERC-20]
+        DSCEngine[DSC Engine<br/>Core Logic<br/>- Collateral Management<br/>- Minting/Burning<br/>- Liquidations<br/>- Health Checks]
+        DSCToken[DSC Token<br/>ERC-20<br/>- Mint/Burn Functions<br/>- Ownership Controls]
     end
     
     subgraph "Participants"
-        Users[Regular Users]
-        Liquidators[Liquidators]
+        Users[Regular Users<br/>- Deposit Collateral<br/>- Mint DSC<br/>- Redeem Collateral<br/>- Burn DSC]
+        Liquidators[Liquidators<br/>- Monitor Health Factors<br/>- Liquidate Unhealthy Positions<br/>- Receive 10% Bonus]
+    end
+    
+    subgraph "Oracle Library"
+        OracleLib[OracleLib<br/>- Stale Price Protection<br/>- 3 Hour Timeout<br/>- Price Validation]
     end
     
     Users -->|1. Deposit| WETH
@@ -91,12 +95,13 @@ flowchart LR
     DSCEngine -->|2. Mint| DSCToken
     DSCToken -->|To User| Users
     
-    PF1 -->|Price Data| DSCEngine
-    PF2 -->|Price Data| DSCEngine
+    PF1 -->|Price Data| OracleLib
+    PF2 -->|Price Data| OracleLib
+    OracleLib -->|Validated Prices| DSCEngine
     
-    DSCEngine -->|Health Check| DSCEngine
+    DSCEngine -->|Health Factor Check| DSCEngine
     Liquidators -->|3. Liquidate<br/>Unhealthy Positions| DSCEngine
-    DSCEngine -->|Collateral + Bonus| Liquidators
+    DSCEngine -->|Collateral + 10% Bonus| Liquidators
     
     style DSCEngine fill:#ff9800,color:#fff
     style DSCToken fill:#4caf50,color:#fff
@@ -104,6 +109,7 @@ flowchart LR
     style Liquidators fill:#9c27b0,color:#fff
     style PF1 fill:#f44336,color:#fff
     style PF2 fill:#f44336,color:#fff
+    style OracleLib fill:#ff5722,color:#fff
 ```
 
 ### Detailed Component Interaction
@@ -113,25 +119,36 @@ sequenceDiagram
     participant U as User
     participant DE as DSCEngine
     participant DSC as DSC Token
+    participant OL as OracleLib
     participant CL as Chainlink Oracle
     participant L as Liquidator
 
     Note over U,L: Normal User Flow
-    U->>DE: 1. Deposit WETH/WBTC
-    DE->>CL: Get collateral price
-    CL->>DE: Return USD price
-    U->>DE: 2. Mint DSC
-    DE->>DE: Check health factor ≥ 1.0
-    DE->>DSC: Mint DSC tokens
-    DSC->>U: Transfer DSC
-
+    U->>DE: 1. depositCollateral(WETH, amount)
+    DE->>OL: Validate price freshness
+    OL->>CL: Get latest price data
+    CL->>OL: Return price with timestamp
+    OL->>DE: Validated price (revert if stale)
+    DE->>DE: Update user collateral balance
+    DE->>U: Transfer WETH to contract
+    
+    U->>DE: 2. mintDsc(amount)
+    DE->>DE: Calculate health factor
+    DE->>DE: Check HF ≥ 1.0
+    DE->>DSC: mint(user, amount)
+    DSC->>U: Transfer DSC tokens
+    
     Note over U,L: Liquidation Flow
-    CL->>DE: Price update (collateral drops)
+    CL->>OL: Price update (collateral drops)
+    OL->>DE: New validated price
     DE->>DE: User health factor < 1.0
-    L->>DE: 3. Liquidate user position
-    DE->>DSC: Burn DSC debt
-    DE->>L: Transfer collateral + 10% bonus
-    DE->>DE: User health factor improved
+    L->>DE: 3. liquidate(collateral, user, debtToCover)
+    DE->>DE: Validate position is liquidatable
+    DE->>DE: Calculate collateral + 10% bonus
+    DE->>U: Transfer collateral to liquidator
+    DE->>DSC: burnDsc(user, debtToCover)
+    DE->>DE: Verify HF improved
+    DE->>DE: Check liquidator HF remains healthy
 ```
 
 ### System Components
@@ -145,15 +162,19 @@ graph TB
     
     subgraph "Smart Contract Layer"
         subgraph "Core Contracts"
-            Engine[DSCEngine.sol<br/>- Collateral Management<br/>- Minting/Burning<br/>- Liquidations<br/>- Health Checks]
-            Token[DecentralizedStableCoin.sol<br/>- ERC-20 Implementation<br/>- Mint/Burn Functions<br/>- Ownership Controls]
+            Engine[DSCEngine.sol<br/>- Collateral Management<br/>- Minting/Burning<br/>- Liquidations<br/>- Health Checks<br/>- Reentrancy Protection]
+            Token[DecentralizedStableCoin.sol<br/>- ERC-20 Implementation<br/>- Mint/Burn Functions<br/>- Ownership Controls<br/>- Only DSCEngine Access]
+        end
+        
+        subgraph "Libraries"
+            OracleLib[OracleLib.sol<br/>- Stale Price Protection<br/>- 3 Hour Timeout<br/>- Price Validation]
         end
         
         subgraph "External Dependencies"
-            Oracle1[Chainlink WETH/USD]
-            Oracle2[Chainlink WBTC/USD]
-            WETH[WETH Contract]
-            WBTC[WBTC Contract]
+            Oracle1[Chainlink WETH/USD<br/>Price Feed]
+            Oracle2[Chainlink WBTC/USD<br/>Price Feed]
+            WETH[WETH Contract<br/>ERC-20]
+            WBTC[WBTC Contract<br/>ERC-20]
         end
     end
     
@@ -164,8 +185,9 @@ graph TB
     UI --> Web3
     Web3 --> Engine
     Engine <--> Token
-    Engine <--> Oracle1
-    Engine <--> Oracle2
+    Engine --> OracleLib
+    OracleLib <--> Oracle1
+    OracleLib <--> Oracle2
     Engine <--> WETH
     Engine <--> WBTC
     
@@ -174,6 +196,7 @@ graph TB
     
     style Engine fill:#ff6b35,color:#fff
     style Token fill:#f7931e,color:#fff
+    style OracleLib fill:#ff5722,color:#fff
     style Oracle1 fill:#375bd2,color:#fff
     style Oracle2 fill:#375bd2,color:#fff
 ```
@@ -251,28 +274,68 @@ sequenceDiagram
     participant U as User (Underwater)
     participant L as Liquidator
     participant E as DSCEngine
+    participant OL as OracleLib
     participant C as Chainlink
+    participant DSC as DSC Token
 
-    Note over U: Health Factor < 1.0
+    Note over U: Health Factor < 1.0 (MIN_HEALTH_FACTOR)
     L->>E: liquidate(collateral, user, debtToCover)
-    E->>C: Get latest price
-    C->>E: Return price data
-    E->>E: Calculate collateral amount + bonus
+    E->>E: Check initial health factor < 1.0
+    E->>OL: Get validated price data
+    OL->>C: latestRoundData() with staleness check
+    C->>OL: Return price + timestamp
+    OL->>E: Validated price (revert if > 3 hours old)
+    
+    E->>E: Calculate tokenAmountFromDebtCovered
+    E->>E: Calculate bonusCollateral (10% of debt coverage)
+    E->>E: totalCollateralToRedeem = debt + bonus
+    
     E->>U: Transfer collateral to liquidator
-    E->>L: Burn DSC from liquidator
-    E->>E: Update user's debt
+    E->>DSC: burnDsc(user, debtToCover)
+    
+    E->>E: Verify HF improved (final > initial)
+    E->>E: Check liquidator's own HF remains healthy
+    
     Note over U: Health Factor improved
+    Note over L: Received collateral + 10% bonus
 ```
 
 **Liquidation Mechanics:**
 
-1. **Validate** position is liquidatable (health factor < 1.0)
-2. **Calculate** collateral amount equivalent to debt covered
-3. **Add** 10% liquidation bonus as incentive
-4. **Transfer** collateral from user to liquidator  
-5. **Burn** DSC debt from user's position
-6. **Verify** liquidation improved user's health factor
-7. **Check** liquidator's own position remains healthy
+1. **Pre-liquidation Validation**:
+   - Position must have health factor < 1.0 (MIN_HEALTH_FACTOR)
+   - Liquidator must provide valid collateral token address
+   - Debt amount must be greater than zero
+
+2. **Price Validation**:
+   - OracleLib checks price staleness (3-hour timeout)
+   - Reverts if price is stale or invalid
+   - Ensures accurate liquidation calculations
+
+3. **Collateral Calculation**:
+   - `tokenAmountFromDebtCovered = (debtToCover × PRECISION) ÷ (price × ADDITIONAL_PRICEFEED_PRECISION)`
+   - `bonusCollateral = (tokenAmountFromDebtCovered × LIQUIDATION_BONUS) ÷ LIQUIDATION_PRECISION`
+   - `totalCollateralToRedeem = tokenAmountFromDebtCovered + bonusCollateral`
+
+4. **State Updates**:
+   - Transfer collateral from liquidated user to liquidator
+   - Burn DSC debt from liquidated user's position
+   - Update user's collateral and debt balances
+
+5. **Post-liquidation Validation**:
+   - Verify liquidation improved user's health factor
+   - Ensure liquidator's own position remains healthy
+   - Revert if health factor didn't improve
+
+**Liquidation Constants:**
+```solidity
+LIQUIDATION_THRESHOLD = 50;        // 50%
+LIQUIDATION_BONUS = 10;            // 10%
+MIN_HEALTH_FACTOR = 1 ether;       // 1.0
+LIQUIDATION_PRECISION = 100;       // 100
+PRECISION = 1e18;                  // 18 decimals
+ADDITIONAL_PRICEFEED_PRECISION = 1e10; // 10 decimals
+```
 
 ## Mathematical Formulas
 
