@@ -79,11 +79,11 @@ contract StopOnRevertHandler is Test {
 
     function redeemCollateral(uint256 collateralSeed, uint256 amount) public {
         ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
-        uint256 maxCollatoralToRedeem = dscEngine.getCollatoralBalanceOfUser(
+        uint256 maxCollateralToRedeem = dscEngine.getCollateralBalanceOfUser(
             address(collateral),
             msg.sender
         );
-        amount = bound(amount, 0, maxCollatoralToRedeem);
+        amount = bound(amount, 0, maxCollateralToRedeem);
         if (amount == 0) return;
         dscEngine.redeemCollateral(address(collateral), amount);
     }
@@ -121,7 +121,7 @@ contract StopOnRevertHandler is Test {
     }
 
     function liquidate(
-        uint256 collatoralSeed,
+        uint256 collateralSeed,
         address userToBeLiquidated,
         uint256 debtToCover
     ) public {
@@ -129,7 +129,7 @@ contract StopOnRevertHandler is Test {
         if (dscEngine.getHealthFactor(userToBeLiquidated) >= minHF) return;
 
         debtToCover = bound(debtToCover, 1, MAX_DEPOSIT_VALUE);
-        ERC20Mock collateral = _getCollateralFromSeed(collatoralSeed);
+        ERC20Mock collateral = _getCollateralFromSeed(collateralSeed);
         dscEngine.liquidate(
             address(collateral),
             userToBeLiquidated,

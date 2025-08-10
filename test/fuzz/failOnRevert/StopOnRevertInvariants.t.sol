@@ -51,8 +51,8 @@ contract StopOnRevertInvariants is StdInvariant, Test {
         dsce.getLiquidationPrecision();
 
         dsce.getMinHealthFactor();
-        dsce.getCollatoralBalanceOfUser(address(weth), address(dsce));
-        dsce.getCollatoralBalanceOfUser(address(wbtc), address(dsce));
+        dsce.getCollateralBalanceOfUser(address(weth), address(dsce));
+        dsce.getCollateralBalanceOfUser(address(wbtc), address(dsce));
         dsce.getUsdValue(weth, 1);
         dsce.getUsdValue(wbtc, 1);
     }
