@@ -238,6 +238,16 @@ contract DSCEngineTest is Test {
         vm.stopPrank();
     }
 
+    function testRevertIfCollateralAddressIsZero() public {
+        vm.startPrank(USER);
+        ERC20Mock(weth).approve(address(dscEngine), AMOUNT_COLLATERAL);
+        vm.expectRevert(
+            abi.encodeWithSelector(DSCEngine.DSCEngine__TokenNotSupported.selector, address(0))
+        );
+        dscEngine.depositCollateral(address(0), AMOUNT_COLLATERAL);
+        vm.stopPrank();
+    }
+
     function testCanDepositCollateralAndGetAccountInfo()
         public
         depositCollateral
@@ -323,6 +333,7 @@ contract DSCEngineTest is Test {
         uint256 userDscBalance = dsc.balanceOf(USER);
         assertEq(userDscBalance, amountToMint);
     }
+
 
     function testRevertMintDscIfZeroAmount() public depositCollateral {
         vm.prank(USER);
@@ -677,6 +688,8 @@ contract DSCEngineTest is Test {
         assertLt(userDebtAfter, 8000e18);
     }
 
+
+
     function testRevertLiquidateHealthyUser()
         public
         depositCollateralAndMintDsc
@@ -690,6 +703,7 @@ contract DSCEngineTest is Test {
         dscEngine.liquidate(weth, USER, 1000e18);
         vm.stopPrank();
     }
+
 
     function testLiquidationImproveHealthFactor() public {
         setupLiquidatableUser();

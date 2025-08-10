@@ -593,7 +593,7 @@ contract DSCEngine is ReentrancyGuard {
     function _getUsdValue(
         address tokenCollateral,
         uint256 usdAmount
-    ) public view returns (uint256) {
+    ) private view returns (uint256) {
         // Get price feed for the token
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             s_priceFeed[tokenCollateral]
@@ -865,107 +865,5 @@ contract DSCEngine is ReentrancyGuard {
         return s_dscMinted[user];
     }
 
-    /*//////////////////////////////////////////////////////////////
-                              UTILITY FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
 
-    /**
-     * @notice Calculates the maximum amount of DSC a user can mint
-     * @param user The address of the user
-     * @return maxDscToMint Maximum DSC amount that can be minted while staying healthy
-     * @dev Formula: (collateral_value * liquidation_threshold) - current_debt
-     * @dev Returns 0 if user is already at or above the liquidation threshold
-     */
-    function getMaxDscToMint(address user) external view returns (uint256) {
-        (uint256 totalDscMinted, uint256 collateralValueInUsd) = _getUserInfo(
-            user
-        );
-
-        // Calculate maximum debt based on collateral and liquidation threshold
-        uint256 maxDebtAllowed = (collateralValueInUsd *
-            LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-
-        // If already at or above limit, return 0
-        if (maxDebtAllowed <= totalDscMinted) {
-            return 0;
-        }
-
-        // Return additional DSC that can be minted
-        return maxDebtAllowed - totalDscMinted;
-    }
-
-    /**
-     * @notice Calculates the maximum amount of collateral a user can redeem
-     * @param user The address of the user
-     * @param tokenCollateral The address of the collateral token to redeem
-     * @return maxCollateralToRedeem Maximum collateral amount that can be redeemed
-     * @dev Ensures user maintains minimum health factor after redemption
-     * @dev Returns 0 if user cannot redeem any collateral while staying healthy
-     */
-    function getMaxCollateralToRedeem(
-        address user,
-        address tokenCollateral
-    ) external view returns (uint256) {
-        uint256 userCollateralBalance = s_collateralDeposited[user][
-            tokenCollateral
-        ];
-        uint256 totalDscMinted = s_dscMinted[user];
-
-        // If no DSC minted, can redeem all collateral
-        if (totalDscMinted == 0) {
-            return userCollateralBalance;
-        }
-
-        // Calculate minimum collateral value needed to maintain health
-        uint256 minCollateralValueNeeded = (totalDscMinted *
-            LIQUIDATION_PRECISION) / LIQUIDATION_THRESHOLD;
-
-        // Get current total collateral value
-        uint256 currentCollateralValue = getAccountCollateralValue(user);
-
-        // If already below minimum, cannot redeem anything
-        if (currentCollateralValue <= minCollateralValueNeeded) {
-            return 0;
-        }
-
-        // Calculate excess collateral value that can be redeemed
-        uint256 excessCollateralValue = currentCollateralValue -
-            minCollateralValueNeeded;
-
-        // Convert excess USD value to token amount
-        uint256 maxTokenAmount = getTokenAmountFromUsd(
-            tokenCollateral,
-            excessCollateralValue
-        );
-
-        // Return minimum of calculated max and actual balance
-        return
-            maxTokenAmount > userCollateralBalance
-                ? userCollateralBalance
-                : maxTokenAmount;
-    }
-
-    /*//////////////////////////////////////////////////////////////
-                           EMERGENCY FUNCTIONS
-    //////////////////////////////////////////////////////////////*/
-
-    /**
-     * @notice Checks if the entire system is healthy
-     * @return isHealthy True if system is healthy, false otherwise
-     * @dev System is healthy if total collateral value > total DSC supply
-     * @dev This is a global health check, not for individual positions
-     */
-    function isSystemHealthy() external view returns (bool) {
-        // Get total DSC supply from the DSC contract
-        uint256 totalDscSupply = IERC20(address(i_dsc)).totalSupply();
-
-        // Calculate total system collateral value
-        uint256 totalSystemCollateralValue = 0;
-
-        // This would require additional state tracking to be efficient
-        // For now, this is a placeholder for the concept
-        // In a production system, you'd want to track total deposits more efficiently
-
-        return totalSystemCollateralValue >= totalDscSupply;
-    }
 }
