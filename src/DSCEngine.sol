@@ -12,63 +12,63 @@ import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
  * @author Varun Chauhan
  * @notice This contract serves as the core engine for a decentralized stablecoin system
  * @dev Implements a collateral-backed stablecoin mechanism inspired by MakerDAO's DAI system
- * 
+ *
  * ═══════════════════════════════════════════════════════════════════════════════
  *                                SYSTEM OVERVIEW
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
+ *
  * The DSC (Decentralized Stablecoin) system allows users to:
  * 1. Deposit approved collateral tokens (WETH, WBTC)
  * 2. Mint DSC stablecoins against their collateral
  * 3. Maintain a healthy collateralization ratio
  * 4. Redeem collateral by burning DSC tokens
  * 5. Participate in liquidations to maintain system health
- * 
+ *
  * ═══════════════════════════════════════════════════════════════════════════════
  *                               SYSTEM PROPERTIES
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
+ *
  * • EXOGENOUSLY COLLATERALIZED: Backed by external crypto assets (WETH, WBTC)
  * • DOLLAR PEGGED: Maintains 1 DSC = $1 USD through algorithmic mechanisms
  * • ALGORITHMICALLY STABLE: Uses liquidation mechanisms to maintain peg stability
  * • OVERCOLLATERALIZED: Requires minimum 200% collateralization ratio
  * • LIQUIDATION THRESHOLD: 50% - positions can be liquidated at 150% collateral ratio
  * • LIQUIDATION BONUS: 10% - liquidators receive bonus collateral for maintaining system health
- * 
+ *
  * ═══════════════════════════════════════════════════════════════════════════════
  *                              MATHEMATICAL FORMULAS
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
+ *
  * Health Factor = (Collateral Value in USD × Liquidation Threshold) ÷ Total DSC Minted
- * 
+ *
  * Where:
  * - Collateral Value = Sum of (Token Amount × Token Price in USD)
  * - Liquidation Threshold = 50% (0.5)
  * - Healthy Position: Health Factor ≥ 1.0
  * - Liquidatable Position: Health Factor < 1.0
- * 
+ *
  * Example:
  * - User deposits $1000 worth of ETH
  * - User mints 400 DSC
  * - Health Factor = ($1000 × 0.5) ÷ 400 = 1.25 ✅ Healthy
  * - If ETH price drops and collateral value becomes $600
  * - Health Factor = ($600 × 0.5) ÷ 400 = 0.75 ❌ Liquidatable
- * 
+ *
  * ═══════════════════════════════════════════════════════════════════════════════
  *                               SECURITY FEATURES
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
+ *
  * • Chainlink Price Feeds: Reliable, decentralized price oracles for accurate asset pricing
  * • Reentrancy Protection: All state-changing functions protected against reentrancy attacks
  * • Health Factor Monitoring: Continuous monitoring prevents undercollateralization
  * • Liquidation Incentives: Economic incentives ensure timely liquidations
  * • Input Validation: Comprehensive validation of all user inputs
  * • Access Control: Proper separation of concerns and role-based access
- * 
+ *
  * ═══════════════════════════════════════════════════════════════════════════════
  *                                 RISK FACTORS
  * ═══════════════════════════════════════════════════════════════════════════════
- * 
+ *
  * • Price Oracle Risk: Dependency on Chainlink price feeds
  * • Collateral Risk: Risk of collateral token value declining rapidly
  * • Liquidation Risk: Risk of insufficient liquidators during market stress
@@ -252,13 +252,13 @@ contract DSCEngine is ReentrancyGuard {
         // Ensure arrays have matching lengths for proper token-pricefeed pairing
         if (tokens.length != priceFeeds.length)
             revert DSCEngine__LengthsOfTokensAndPriceFeedsMustMatch();
-        
+
         // Initialize supported collateral tokens and their price feeds
         for (uint256 i = 0; i < tokens.length; i++) {
             s_collateralTokens.push(tokens[i]);
             s_priceFeed[tokens[i]] = priceFeeds[i];
         }
-        
+
         // Set the DSC token contract reference
         i_dsc = DecentralizedStableCoin(_dsc);
     }
@@ -283,7 +283,7 @@ contract DSCEngine is ReentrancyGuard {
     ) external {
         // Step 1: Deposit collateral to increase user's collateral balance
         depositCollateral(tokenCollatoral, amount);
-        
+
         // Step 2: Mint DSC tokens against the deposited collateral
         mintDsc(amountDscToMint);
     }
@@ -303,11 +303,35 @@ contract DSCEngine is ReentrancyGuard {
     ) external moreThanZero(amount) isAllowedToken(tokenCollatoral) {
         // Step 1: Burn DSC tokens to reduce user's debt
         _burnDsc(amountDscToBurn, msg.sender, msg.sender);
-        
+
         // Step 2: Redeem collateral from user's deposit
-        _redeemCollatoral(msg.sender, msg.sender, tokenCollatoral, amount);
-        
+        _redeemCollateral(msg.sender, msg.sender, tokenCollatoral, amount);
+
         // Step 3: Ensure the user's position remains healthy after the operation
+        _revertIfHealthFactorIsBroken(msg.sender);
+    }
+
+    /*
+     * @param tokenCollateralAddress: The ERC20 token address of the collateral you're redeeming
+     * @param amountCollateral: The amount of collateral you're redeeming
+     * @notice This function will redeem your collateral.
+     * @notice If you have DSC minted, you will not be able to redeem until you burn your DSC
+     */
+    function redeemCollateral(
+        address tokenCollateralAddress,
+        uint256 amountCollateral
+    )
+        external
+        moreThanZero(amountCollateral)
+        nonReentrant
+        isAllowedToken(tokenCollateralAddress)
+    {
+        _redeemCollateral(
+            msg.sender,
+            msg.sender,
+            tokenCollateralAddress,
+            amountCollateral
+        );
         _revertIfHealthFactorIsBroken(msg.sender);
     }
 
@@ -320,7 +344,7 @@ contract DSCEngine is ReentrancyGuard {
     function burnDsc(uint256 amount) external moreThanZero(amount) {
         // Burn DSC tokens from user's balance
         _burnDsc(amount, msg.sender, msg.sender);
-        
+
         // Verify health factor (should be improved after burning debt)
         _revertIfHealthFactorIsBroken(msg.sender);
     }
@@ -333,7 +357,7 @@ contract DSCEngine is ReentrancyGuard {
      * @dev Only positions with health factor < 1.0 can be liquidated
      * @dev Liquidator receives bonus collateral as incentive for maintaining system health
      * @dev Partial liquidations are allowed - liquidator doesn't need to cover entire debt
-     * 
+     *
      * LIQUIDATION MECHANICS:
      * 1. Calculate collateral amount equivalent to debt being covered
      * 2. Add liquidation bonus (10%) to incentivize liquidators
@@ -372,7 +396,7 @@ contract DSCEngine is ReentrancyGuard {
             bonusCollatoral;
 
         // Transfer collateral from liquidated user to liquidator
-        _redeemCollatoral(
+        _redeemCollateral(
             user,
             msg.sender,
             collatoral,
@@ -386,7 +410,7 @@ contract DSCEngine is ReentrancyGuard {
         uint256 finalHealthFactor = _healthFactor(user);
         if (finalHealthFactor <= initialHealthFactor)
             revert DSCEngine__HealthFactorNotImproved();
-            
+
         // Ensure the liquidator's own position remains healthy
         _revertIfHealthFactorIsBroken(msg.sender);
     }
@@ -402,7 +426,7 @@ contract DSCEngine is ReentrancyGuard {
      * @dev Increases user's collateral balance and transfers tokens to this contract
      * @dev Does not mint DSC tokens - use mintDsc() or depositCollateralAndMintDsc() for that
      * @dev User must approve this contract to spend their tokens before calling
-     * 
+     *
      * PROCESS:
      * 1. Validate inputs (amount > 0, token is supported)
      * 2. Update user's collateral balance in state
@@ -416,10 +440,10 @@ contract DSCEngine is ReentrancyGuard {
     ) public moreThanZero(amount) isAllowedToken(tokenCollatoral) nonReentrant {
         // Update user's collateral balance
         s_collateralDeposited[msg.sender][tokenCollatoral] += amount;
-        
+
         // Emit event for off-chain tracking and transparency
         emit DepositCollatoral(msg.sender, tokenCollatoral, amount);
-        
+
         // Transfer collateral tokens from user to this contract
         bool success = IERC20(tokenCollatoral).transferFrom(
             msg.sender,
@@ -434,7 +458,7 @@ contract DSCEngine is ReentrancyGuard {
      * @param amountDscToMint The amount of DSC tokens to mint (in wei, 18 decimals)
      * @dev Requires sufficient collateral to maintain health factor ≥ 1.0
      * @dev User's debt increases by the minted amount
-     * 
+     *
      * PROCESS:
      * 1. Validate amount > 0
      * 2. Update user's DSC debt balance
@@ -469,7 +493,7 @@ contract DSCEngine is ReentrancyGuard {
      * @dev Used by both regular redemption and liquidation functions
      * @dev Updates state first, then transfers tokens (follows CEI pattern)
      */
-    function _redeemCollatoral(
+    function _redeemCollateral(
         address from,
         address to,
         address tokenCollatoral,
@@ -477,10 +501,10 @@ contract DSCEngine is ReentrancyGuard {
     ) private {
         // Decrease user's collateral balance (will revert if insufficient balance)
         s_collateralDeposited[from][tokenCollatoral] -= amount;
-        
+
         // Emit event for transparency and off-chain tracking
         emit CollatoralRedeemed(from, to, tokenCollatoral, amount);
-        
+
         // Transfer collateral tokens from contract to recipient
         bool success = IERC20(tokenCollatoral).transfer(to, amount);
         if (!success) revert DSCEngine__TransferFailed();
@@ -501,11 +525,11 @@ contract DSCEngine is ReentrancyGuard {
     ) private {
         // Reduce user's DSC debt (will revert if insufficient debt)
         s_dscMinted[ofBehalfOf] -= amountToBurn;
-        
+
         // Transfer DSC tokens from burner to this contract
         bool success = i_dsc.transferFrom(dscFrom, address(this), amountToBurn);
         if (!success) revert DSCEngine__TransferFailed();
-        
+
         // Burn the DSC tokens (removes from circulation)
         i_dsc.burn(amountToBurn);
     }
@@ -534,7 +558,9 @@ contract DSCEngine is ReentrancyGuard {
      * @dev Returns type(uint256).max if no DSC is minted (infinite health)
      */
     function _healthFactor(address user) private view returns (uint256) {
-        (uint256 totalDscMinted, uint256 collatoralValueInUsd) = _getUserInfo(user);
+        (uint256 totalDscMinted, uint256 collatoralValueInUsd) = _getUserInfo(
+            user
+        );
         return _calculateHealthFactor(totalDscMinted, collatoralValueInUsd);
     }
 
@@ -572,13 +598,14 @@ contract DSCEngine is ReentrancyGuard {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             s_priceFeed[tokenCollatoral]
         );
-        
+
         // Get latest price with staleness check
         (, int256 price, , , ) = priceFeed.staleCheckLatestRoundData();
-        
+
         // Convert to USD with proper precision handling
         // Price feed gives price with 8 decimals, we need 18 for calculations
-        return ((usdAmount * (uint256(price) * ADDITIONAL_PRICEFEED_PRECISION)) / PRECISION);
+        return ((usdAmount *
+            (uint256(price) * ADDITIONAL_PRICEFEED_PRECISION)) / PRECISION);
     }
 
     /**
@@ -595,12 +622,12 @@ contract DSCEngine is ReentrancyGuard {
     ) internal pure returns (uint256) {
         // If no DSC is minted, health factor is infinite (perfectly healthy)
         if (totalDscMinted == 0) return type(uint256).max;
-        
+
         // Apply liquidation threshold to collateral value
         // This represents the "effective" collateral value for health calculations
         uint256 collateralAdjustedForThreshold = (collatoralValueInUsd *
             LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
-            
+
         // Calculate health factor with proper precision
         return (collateralAdjustedForThreshold * PRECISION) / totalDscMinted;
     }
@@ -654,7 +681,7 @@ contract DSCEngine is ReentrancyGuard {
         for (uint256 i = 0; i < s_collateralTokens.length; i++) {
             address token = s_collateralTokens[i];
             uint256 amount = s_collateralDeposited[user][token];
-            
+
             // Add USD value of this token to total
             totalCollatoralValueInUsd += _getUsdValue(token, amount);
         }
@@ -696,7 +723,7 @@ contract DSCEngine is ReentrancyGuard {
      * @return tokenAmount The equivalent amount of tokens
      * @dev Used in liquidation calculations to determine collateral amounts
      * @dev Formula: (USD_amount * PRECISION) / (price * additional_precision)
-     * 
+     *
      * Example:
      * - Want to cover $100 of debt with ETH
      * - ETH price is $2000
@@ -710,10 +737,10 @@ contract DSCEngine is ReentrancyGuard {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(
             s_priceFeed[token]
         );
-        
+
         // Get latest price with staleness protection
         (, int256 price, , , ) = priceFeed.staleCheckLatestRoundData();
-        
+
         // Convert USD to token amount with proper precision handling
         return ((usdAmountInWei * PRECISION) /
             (uint256(price) * ADDITIONAL_PRICEFEED_PRECISION));
@@ -817,7 +844,7 @@ contract DSCEngine is ReentrancyGuard {
      * @return healthFactor The user's current health factor
      * @dev External wrapper for internal health factor calculation
      * @dev Returns type(uint256).max if user has no DSC minted
-     * 
+     *
      * HEALTH FACTOR INTERPRETATION:
      * - > 1.0: Healthy position, cannot be liquidated
      * - = 1.0: At liquidation threshold, risky position
@@ -850,17 +877,19 @@ contract DSCEngine is ReentrancyGuard {
      * @dev Returns 0 if user is already at or above the liquidation threshold
      */
     function getMaxDscToMint(address user) external view returns (uint256) {
-        (uint256 totalDscMinted, uint256 collatoralValueInUsd) = _getUserInfo(user);
-        
+        (uint256 totalDscMinted, uint256 collatoralValueInUsd) = _getUserInfo(
+            user
+        );
+
         // Calculate maximum debt based on collateral and liquidation threshold
-        uint256 maxDebtAllowed = (collatoralValueInUsd * LIQUIDATION_THRESHOLD) 
-            / LIQUIDATION_PRECISION;
-            
+        uint256 maxDebtAllowed = (collatoralValueInUsd *
+            LIQUIDATION_THRESHOLD) / LIQUIDATION_PRECISION;
+
         // If already at or above limit, return 0
         if (maxDebtAllowed <= totalDscMinted) {
             return 0;
         }
-        
+
         // Return additional DSC that can be minted
         return maxDebtAllowed - totalDscMinted;
     }
@@ -874,37 +903,46 @@ contract DSCEngine is ReentrancyGuard {
      * @dev Returns 0 if user cannot redeem any collateral while staying healthy
      */
     function getMaxCollateralToRedeem(
-        address user, 
+        address user,
         address tokenCollatoral
     ) external view returns (uint256) {
-        uint256 userCollateralBalance = s_collateralDeposited[user][tokenCollatoral];
+        uint256 userCollateralBalance = s_collateralDeposited[user][
+            tokenCollatoral
+        ];
         uint256 totalDscMinted = s_dscMinted[user];
-        
+
         // If no DSC minted, can redeem all collateral
         if (totalDscMinted == 0) {
             return userCollateralBalance;
         }
-        
+
         // Calculate minimum collateral value needed to maintain health
-        uint256 minCollateralValueNeeded = (totalDscMinted * LIQUIDATION_PRECISION) 
-            / LIQUIDATION_THRESHOLD;
-            
+        uint256 minCollateralValueNeeded = (totalDscMinted *
+            LIQUIDATION_PRECISION) / LIQUIDATION_THRESHOLD;
+
         // Get current total collateral value
         uint256 currentCollateralValue = getAccountCollatoralValue(user);
-        
+
         // If already below minimum, cannot redeem anything
         if (currentCollateralValue <= minCollateralValueNeeded) {
             return 0;
         }
-        
+
         // Calculate excess collateral value that can be redeemed
-        uint256 excessCollateralValue = currentCollateralValue - minCollateralValueNeeded;
-        
+        uint256 excessCollateralValue = currentCollateralValue -
+            minCollateralValueNeeded;
+
         // Convert excess USD value to token amount
-        uint256 maxTokenAmount = getTokenAmountFromUsd(tokenCollatoral, excessCollateralValue);
-        
+        uint256 maxTokenAmount = getTokenAmountFromUsd(
+            tokenCollatoral,
+            excessCollateralValue
+        );
+
         // Return minimum of calculated max and actual balance
-        return maxTokenAmount > userCollateralBalance ? userCollateralBalance : maxTokenAmount;
+        return
+            maxTokenAmount > userCollateralBalance
+                ? userCollateralBalance
+                : maxTokenAmount;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -920,16 +958,14 @@ contract DSCEngine is ReentrancyGuard {
     function isSystemHealthy() external view returns (bool) {
         // Get total DSC supply from the DSC contract
         uint256 totalDscSupply = IERC20(address(i_dsc)).totalSupply();
-        
+
         // Calculate total system collateral value
         uint256 totalSystemCollateralValue = 0;
-        
+
         // This would require additional state tracking to be efficient
         // For now, this is a placeholder for the concept
         // In a production system, you'd want to track total deposits more efficiently
-        
+
         return totalSystemCollateralValue >= totalDscSupply;
     }
-
-
 }

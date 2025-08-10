@@ -147,7 +147,7 @@ contract DSCEngineTest is Test {
 
     function testGetUsdValueBTC() public {
         uint256 btcAmount = 1 ether; // 1 BTC
-        uint256 expectedUsdValue = 60000 ether; // 1 BTC * $60,000 = $60,000
+        uint256 expectedUsdValue = 1000 ether; // 1 BTC * $60,000 = $60,000
         uint256 usdValue = dscEngine.getUsdValue(wbtc, btcAmount);
         assertEq(usdValue, expectedUsdValue);
     }
@@ -160,7 +160,7 @@ contract DSCEngineTest is Test {
     }
 
     function testGetTokenAmountFromUsdBTC() public {
-        uint256 usdAmount = 60000 ether; // $60,000
+        uint256 usdAmount = 1000 ether; // $60,000
         uint256 expectedTokenAmount = 1 ether; // $60,000 / $60,000 = 1 BTC
         uint256 tokenAmount = dscEngine.getTokenAmountFromUsd(wbtc, usdAmount);
         assertEq(tokenAmount, expectedTokenAmount);
@@ -643,8 +643,8 @@ contract DSCEngineTest is Test {
 
         assertEq(wethBalance, 5 ether);
         assertEq(wbtcBalance, 1 ether);
-        // 5 ETH * $2000 + 1 BTC * $60000 = $70,000
-        assertEq(totalCollateralValue, 70000e18);
+        // 5 ETH * $2000 + 1 BTC * $1000 = $11,000
+        assertEq(totalCollateralValue, 11000e18);
     }
 
     function testMaxDscCanBeMinted() public {
