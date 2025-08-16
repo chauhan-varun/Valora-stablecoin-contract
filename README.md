@@ -1,4 +1,4 @@
-# Decentralized Stablecoin Protocol
+# Valora Stablecoin Protocol
 
 *A Foundry-powered implementation by Varun Chauhan*
 
